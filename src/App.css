@@ -1,38 +1,392 @@
-.App {
-  text-align: center;
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { motion } from "framer-motion";
+import { Volume2, VolumeX, User, Cpu, X, Circle } from "lucide-react";
+
+const TicTacToe = () => {
+  const [board, setBoard] = useState(Array(9).fill(null));
+  const [xIsNext, setXIsNext] = useState(true);
+  const [winner, setWinner] = useState(null);
+  const [winLine, setWinLine] = useState(null);
+  const [isMuted, setIsMuted] = useState(false);
+  const [isGameActive, setIsGameActive] = useState(false);
+  const [scores, setScores] = useState({ X: 0, O: 0, draws: 0 });
+  const [gameMode, setGameMode] = useState("twoPlayer");
+  const [difficulty, setDifficulty] = useState("easy");
+  const [playerSymbol, setPlayerSymbol] = useState("X");
+
+  const moveAudio = useRef(new Audio("/sounds/move.mp3"));
+  const winAudio = useRef(new Audio("/sounds/win.mp3"));
+  const startAudio = useRef(new Audio("/sounds/start.mp3"));
+  const backgroundMusic = useRef(new Audio("/sounds/background.mp3"));
+
+  const playAudio = useCallback(
+    (audio) => {
+      if (!isMuted && audio.readyState >= 2) {
+        audio.currentTime = 0;
+        audio.play().catch((e) => console.error("Audio play failed:", e));
+      }
+    },
+    [isMuted]
+  );
+
+  const fadeOutAudio = useCallback((audio, duration = 1000) => {
+    const fade = setInterval(() => {
+      if (audio.volume > 0.1) {
+        audio.volume -= 0.1;
+      } else {
+        clearInterval(fade);
+        audio.pause();
+        audio.volume = 1;
+      }
+    }, duration / 10);
+  }, []);
+
+  useEffect(() => {
+    const bgMusic = backgroundMusic.current;
+    bgMusic.loop = true;
+
+    const handleGameStart = () => {
+      if (!isMuted && isGameActive) {
+        bgMusic
+          .play()
+          .catch((e) => console.error("Background music play failed:", e));
+      }
+    };
+
+    const handleGameEnd = () => {
+      fadeOutAudio(bgMusic);
+    };
+
+    if (isGameActive) {
+      handleGameStart();
+    } else {
+      handleGameEnd();
+    }
+
+    return () => {
+      bgMusic.pause();
+      bgMusic.currentTime = 0;
+    };
+  }, [isMuted, isGameActive, fadeOutAudio]);
+
+  useEffect(() => {
+    const calculatedWinner = calculateWinner(board);
+    if (calculatedWinner) {
+      setWinner(calculatedWinner.winner);
+      setWinLine(calculatedWinner.line);
+      setIsGameActive(false);
+      fadeOutAudio(backgroundMusic.current, 500);
+      setTimeout(() => playAudio(winAudio.current), 500);
+      setScores((prev) => ({
+        ...prev,
+        [calculatedWinner.winner]: prev[calculatedWinner.winner] + 1,
+      }));
+    } else if (board.every(Boolean)) {
+      setWinner("draw");
+      setIsGameActive(false);
+      setScores((prev) => ({ ...prev, draws: prev.draws + 1 }));
+    } else if (gameMode === "singlePlayer" && !xIsNext && isGameActive) {
+      // AI's turn
+      const aiMove = getAIMove(board, difficulty);
+      setTimeout(() => {
+        handleClick(aiMove);
+      }, 500);
+    }
+  }, [
+    board,
+    gameMode,
+    difficulty,
+    xIsNext,
+    isGameActive,
+    playAudio,
+    fadeOutAudio,
+    playerSymbol,
+  ]);
+
+  const handleClick = (i) => {
+    if (winner || board[i]) return;
+    const newBoard = [...board];
+    newBoard[i] = xIsNext ? playerSymbol : playerSymbol === "X" ? "O" : "X";
+    setBoard(newBoard);
+    setXIsNext(!xIsNext);
+    playAudio(moveAudio.current);
+    if (!isGameActive) {
+      setIsGameActive(true);
+      playAudio(backgroundMusic.current);
+    }
+  };
+
+  const renderSquare = (i) => (
+    <motion.button
+      key={i}
+      className={`w-20 h-20 sm:w-24 sm:h-24 text-3xl sm:text-4xl font-bold rounded-lg shadow-lg focus:outline-none focus:ring-4 focus:ring-blue-300 ${
+        board[i] === "X"
+          ? "bg-pink-500 text-white"
+          : board[i] === "O"
+          ? "bg-yellow-300 text-purple-800"
+          : "bg-white hover:bg-gray-100"
+      }`}
+      onClick={() => handleClick(i)}
+      whileHover={{ scale: 1.05 }}
+      whileTap={{ scale: 0.95 }}
+    >
+      {board[i]}
+    </motion.button>
+  );
+
+  const resetGame = () => {
+    setBoard(Array(9).fill(null));
+    setXIsNext(true);
+    setWinner(null);
+    setWinLine(null);
+    setIsGameActive(true);
+    playAudio(startAudio.current);
+    playAudio(backgroundMusic.current);
+  };
+
+  const toggleMute = () => {
+    setIsMuted((prev) => !prev);
+    if (isMuted) {
+      if (isGameActive)
+        backgroundMusic.current
+          .play()
+          .catch((e) => console.error("Audio play failed:", e));
+    } else {
+      backgroundMusic.current.pause();
+    }
+  };
+
+  const toggleGameMode = () => {
+    setGameMode((prev) =>
+      prev === "twoPlayer" ? "singlePlayer" : "twoPlayer"
+    );
+    resetGame();
+  };
+
+  const changeDifficulty = (newDifficulty) => {
+    setDifficulty(newDifficulty);
+    resetGame();
+  };
+
+  const togglePlayerSymbol = () => {
+    setPlayerSymbol((prev) => (prev === "X" ? "O" : "X"));
+    resetGame();
+  };
+
+  let status;
+  if (winner === "draw") {
+    status = "It's a draw!";
+  } else if (winner) {
+    status = `Winner: ${winner}`;
+  } else {
+    status = `Next player: ${
+      xIsNext ? playerSymbol : playerSymbol === "X" ? "O" : "X"
+    }`;
+  }
+
+  const strikeClass = {
+    0: "left-0 top-[16.67%] w-full h-1",
+    1: "left-0 top-[50%] w-full h-1",
+    2: "left-0 top-[83.33%] w-full h-1",
+    3: "top-0 left-[16.67%] h-full w-1",
+    4: "top-0 left-[50%] h-full w-1",
+    5: "top-0 left-[83.33%] h-full w-1",
+    6: "left-0 top-0 w-[141%] h-1 origin-top-left rotate-45",
+    7: "right-0 top-0 w-[141%] h-1 origin-top-right -rotate-45",
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-600 p-4">
+      <h1 className="mb-6 text-4xl font-bold text-white">Tic-Tac-Toe</h1>
+      <div className="mb-4 text-2xl font-bold text-white">{status}</div>
+      <motion.div
+        className="grid grid-cols-3 gap-2 bg-white bg-opacity-20 p-3 rounded-xl shadow-2xl relative"
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ type: "spring", stiffness: 260, damping: 20 }}
+      >
+        {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => renderSquare(i))}
+        {winLine !== null && (
+          <motion.div
+            className={`absolute bg-yellow-400 ${strikeClass[winLine]}`}
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ duration: 0.5 }}
+          />
+        )}
+      </motion.div>
+      <div className="mt-6 flex flex-wrap justify-center items-center gap-4">
+        <motion.button
+          className="px-6 py-2 text-white bg-green-500 rounded-full shadow-lg text-xl font-semibold"
+          onClick={resetGame}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          New Game
+        </motion.button>
+        <motion.button
+          className="p-2 bg-white rounded-full shadow-lg"
+          onClick={toggleMute}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          {isMuted ? <VolumeX size={24} /> : <Volume2 size={24} />}
+        </motion.button>
+        <motion.button
+          className="px-6 py-2 text-white bg-blue-500 rounded-full shadow-lg text-xl font-semibold flex items-center gap-2"
+          onClick={toggleGameMode}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          {gameMode === "twoPlayer" ? (
+            <>
+              <User size={24} /> Two Player
+            </>
+          ) : (
+            <>
+              <Cpu size={24} /> Single Player
+            </>
+          )}
+        </motion.button>
+        <motion.button
+          className={`px-6 py-2 text-white rounded-full shadow-lg text-xl font-semibold flex items-center gap-2 ${
+            playerSymbol === "X"
+              ? "bg-pink-500"
+              : "bg-yellow-300 text-purple-800"
+          }`}
+          onClick={togglePlayerSymbol}
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          {playerSymbol === "X" ? <X size={24} /> : <Circle size={24} />}
+          Play as {playerSymbol}
+        </motion.button>
+      </div>
+      {gameMode === "singlePlayer" && (
+        <div className="mt-4 flex gap-2">
+          {["easy", "medium", "hard"].map((level) => (
+            <motion.button
+              key={level}
+              className={`px-4 py-2 rounded-full shadow-lg text-lg font-semibold ${
+                difficulty === level
+                  ? "bg-yellow-500 text-white"
+                  : "bg-white text-gray-800"
+              }`}
+              onClick={() => changeDifficulty(level)}
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              {level.charAt(0).toUpperCase() + level.slice(1)}
+            </motion.button>
+          ))}
+        </div>
+      )}
+      <div className="mt-6 bg-white bg-opacity-20 p-4 rounded-xl shadow-lg">
+        <h2 className="text-2xl font-bold text-white mb-2">Scores</h2>
+        <div className="flex justify-between space-x-4">
+          <div className="text-center">
+            <p className="text-lg font-semibold text-pink-300">X</p>
+            <p className="text-xl font-bold text-white">{scores.X}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-semibold text-yellow-300">O</p>
+            <p className="text-xl font-bold text-white">{scores.O}</p>
+          </div>
+          <div className="text-center">
+            <p className="text-lg font-semibold text-blue-300">Draws</p>
+            <p className="text-xl font-bold text-white">{scores.draws}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+function calculateWinner(squares) {
+  const lines = [
+    [0, 1, 2],
+    [3, 4, 5],
+    [6, 7, 8],
+    [0, 3, 6],
+    [1, 4, 7],
+    [2, 5, 8],
+    [0, 4, 8],
+    [2, 4, 6],
+  ];
+  for (let i = 0; i < lines.length; i++) {
+    const [a, b, c] = lines[i];
+    if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
+      return { winner: squares[a], line: i };
+    }
+  }
+  return null;
 }
 
-.App-logo {
-  height: 40vmin;
-  pointer-events: none;
-}
+function getAIMove(board, difficulty) {
+  const availableMoves = board.reduce((moves, cell, index) => {
+    if (cell === null) moves.push(index);
+    return moves;
+  }, []);
 
-@media (prefers-reduced-motion: no-preference) {
-  .App-logo {
-    animation: App-logo-spin infinite 20s linear;
+  switch (difficulty) {
+    case "easy":
+      return availableMoves[Math.floor(Math.random() * availableMoves.length)];
+    case "medium":
+      return Math.random() < 0.5
+        ? getBestMove(board)
+        : availableMoves[Math.floor(Math.random() * availableMoves.length)];
+    case "hard":
+      return getBestMove(board);
+    default:
+      return availableMoves[Math.floor(Math.random() * availableMoves.length)];
   }
 }
 
-.App-header {
-  background-color: #282c34;
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  font-size: calc(10px + 2vmin);
-  color: white;
+function getBestMove(board) {
+  let bestScore = -Infinity;
+  let bestMove;
+  for (let i = 0; i < 9; i++) {
+    if (board[i] === null) {
+      board[i] = "O";
+      let score = minimax(board, 0, false);
+      board[i] = null;
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = i;
+      }
+    }
+  }
+  return bestMove;
 }
 
-.App-link {
-  color: #61dafb;
+function minimax(board, depth, isMaximizing) {
+  const result = calculateWinner(board);
+  if (result) return result.winner === "O" ? 10 - depth : depth - 10;
+  if (board.every(Boolean)) return 0;
+
+  if (isMaximizing) {
+    let bestScore = -Infinity;
+    for (let i = 0; i < 9; i++) {
+      if (board[i] === null) {
+        board[i] = "O";
+        let score = minimax(board, depth + 1, false);
+        board[i] = null;
+        bestScore = Math.max(score, bestScore);
+      }
+    }
+    return bestScore;
+  } else {
+    let bestScore = Infinity;
+    for (let i = 0; i < 9; i++) {
+      if (board[i] === null) {
+        board[i] = "X";
+        let score = minimax(board, depth + 1, true);
+        board[i] = null;
+        bestScore = Math.min(score, bestScore);
+      }
+    }
+    return bestScore;
+  }
 }
 
-@keyframes App-logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
+export default TicTacToe;
